@@ -42,7 +42,12 @@ const openai = process.env.OPENAI_API_KEY ?
   new OpenAI({ apiKey: process.env.OPENAI_API_KEY || "default_key" }) :
   null;
 
+// Import our funnel routes
+import { registerFunnelRoutes } from "./routes/funnelRoutes";
+
 export async function registerRoutes(app: Express): Promise<Server> {
+  // Register AI-powered sales optimization and click funnel routes
+  registerFunnelRoutes(app);
   const httpServer = createServer(app);
   
   // Create WebSocket server for chatbot
