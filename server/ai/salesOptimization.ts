@@ -1,16 +1,59 @@
 /**
- * AI-powered sales optimization system for UTV parts e-commerce
+ * Free-Tier AI-powered sales optimization system for UTV parts e-commerce
  * These tools enable guaranteed daily sales through personalization and optimization
+ * Optimized for free hosting tiers with minimal memory usage and efficient processing
  */
 
 import OpenAI from "openai";
 import { storage } from "../storage";
 import { Product, Order } from "../../shared/schema";
 
-// Initialize OpenAI if API key is available
+// Initialize OpenAI if API key is available with built-in fallback logic
 const openai = process.env.OPENAI_API_KEY ?
   new OpenAI({ apiKey: process.env.OPENAI_API_KEY }) :
   null;
+
+// Cache for AI responses to minimize API usage and work within free tier limits
+const aiResponseCache: Record<string, {
+  response: any,
+  timestamp: number
+}> = {};
+
+// Maximum cache age in milliseconds (30 minutes)
+const MAX_CACHE_AGE = 30 * 60 * 1000;
+
+// Memory-efficient cache management
+function getCachedResponse(cacheKey: string): any | null {
+  const cached = aiResponseCache[cacheKey];
+  if (!cached) return null;
+  
+  // Automatic cache invalidation based on age
+  if (Date.now() - cached.timestamp > MAX_CACHE_AGE) {
+    delete aiResponseCache[cacheKey];
+    return null;
+  }
+  
+  return cached.response;
+}
+
+function setCachedResponse(cacheKey: string, response: any): void {
+  // Keep cache size manageable for free hosting
+  const cacheSize = Object.keys(aiResponseCache).length;
+  if (cacheSize > 100) {
+    // Find and remove oldest cache entries if we exceed 100 items
+    const oldestEntries = Object.entries(aiResponseCache)
+      .sort((a, b) => a[1].timestamp - b[1].timestamp)
+      .slice(0, 10)
+      .map(entry => entry[0]);
+    
+    oldestEntries.forEach(key => delete aiResponseCache[key]);
+  }
+  
+  aiResponseCache[cacheKey] = {
+    response,
+    timestamp: Date.now()
+  };
+}
 
 /**
  * Personalization and targeting system

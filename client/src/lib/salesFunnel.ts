@@ -1,324 +1,287 @@
 /**
- * Client-side Sales Funnel Integration
- * Connect to AI-powered optimization APIs to drive guaranteed sales
+ * Client-side sales funnel with optimization for free tier hosting
+ * - Uses browser localStorage for caching
+ * - Implements bandwidth-friendly API calls
+ * - Handles offline fallback for guaranteed sales
  */
+import { apiRequest } from './queryClient';
 
-import { apiRequest } from "./queryClient";
-import { Product } from "../../shared/schema";
-
-// Types for API responses
+// Types for personalized offers returned by the API
 export interface FunnelOffer {
   id: number;
   name: string;
   description: string;
-  image: string | null;
+  image?: string;
   originalPrice: number | string;
-  offerPrice: number | string | null;
+  offerPrice?: number | string;
   discountPercentage: number;
 }
 
 export interface PersonalizedOffersResponse {
-  segmentId: string;
-  funnelStepId: string;
-  cta: string;
-  message: string;
   offers: FunnelOffer[];
-}
-
-export interface ProductRecommendation {
-  id: number;
-  name: string;
-  slug: string;
-  price: number | string;
-  image: string | null;
-  rating: number;
-  reviewCount: number;
-}
-
-export interface RecommendationsResponse {
-  recommendations: ProductRecommendation[];
-}
-
-export interface CartRecommendation {
-  triggerProductId: number;
-  recommendations: FunnelOffer[];
-}
-
-export interface CartRecommendationsResponse {
-  segmentId: string;
-  recommendations: CartRecommendation[];
+  message: string;
+  cta: string;
+  segment?: string;
 }
 
 export interface CheckoutOffer {
   id: number;
   name: string;
-  image: string | null;
-  price: number | string;
   description: string;
-  cta: string;
   message: string;
+  image?: string;
+  price: number | string;
+  cta: string;
 }
 
 export interface CheckoutOffersResponse {
   offers: CheckoutOffer[];
 }
 
-export interface NextPurchaseOffer {
-  discountCode: string;
-  discountValue: number;
-  discountType: string;
-  validDays: number;
-  message: string;
-}
+// Cache durations in milliseconds - keep short for a responsive system
+const CACHE_DURATIONS = {
+  PERSONALIZED_OFFERS: 15 * 60 * 1000, // 15 minutes
+  CHECKOUT_OFFERS: 10 * 60 * 1000,     // 10 minutes
+  USER_SEGMENT: 24 * 60 * 60 * 1000,   // 24 hours
+};
 
-export interface OrderConfirmationOffersResponse {
-  segmentId: string;
-  nextPurchaseOffer: NextPurchaseOffer;
-  recommendations: ProductRecommendation[];
-}
+// Fallback recommendations in case of API failure or offline mode
+// These ensure sales even if the API is unavailable
+const FALLBACK_OFFERS: FunnelOffer[] = [
+  {
+    id: 1,
+    name: "SuperATV Heavy Duty Replacement Axle",
+    description: "Upgraded Rhino Brand axle for Polaris RZR models with reinforced CV joints.",
+    image: "/images/products/superatv-axle.jpg",
+    originalPrice: 299.99,
+    offerPrice: 249.99,
+    discountPercentage: 17
+  },
+  {
+    id: 2,
+    name: "Pro Armor Crawler XG Tires (Set of 4)",
+    description: "Aggressive all-terrain UTV tires with reinforced sidewalls for extreme terrain.",
+    image: "/images/products/proarmor-tires.jpg",
+    originalPrice: 799.99,
+    offerPrice: 699.99,
+    discountPercentage: 12
+  },
+  {
+    id: 3, 
+    name: "High Lifter Lift Kit",
+    description: "2-inch lift kit specifically designed for Honda Pioneer models.",
+    image: "/images/products/highlifter-liftkit.jpg",
+    originalPrice: 449.99,
+    discountPercentage: 0
+  }
+];
 
-// Session storage for viewed products
-const SESSION_VIEWED_PRODUCTS_KEY = 'viewed_products';
+const FALLBACK_CHECKOUT_OFFERS: CheckoutOffer[] = [
+  {
+    id: 4,
+    name: "Tusk UTV Mirror Set",
+    description: "Side view mirrors for improved visibility and safety. Universal mounting.",
+    message: "Complete your order with this popular accessory!",
+    image: "/images/products/tusk-mirrors.jpg",
+    price: 49.99,
+    cta: "Add to Order"
+  }
+];
 
-/**
- * Records a product view to the backend for analytics and personalization
- * @param productId Product that was viewed
- * @param userId User ID if logged in
- */
-export async function recordProductView(productId: number, userId?: number): Promise<void> {
+// Cache management using browser localStorage to reduce server load
+function setCachedData(key: string, data: any, duration: number): void {
+  if (!localStorage) return;
+  
   try {
-    // Generate a simple session ID if not available
-    const sessionId = localStorage.getItem('session_id') || 
-      `session_${Math.random().toString(36).substring(2, 15)}`;
-    
-    // Store session ID if not already stored
-    if (!localStorage.getItem('session_id')) {
-      localStorage.setItem('session_id', sessionId);
-    }
-    
-    // Add to viewed products in session
-    const viewedProducts = getViewedProducts();
-    if (!viewedProducts.includes(productId)) {
-      viewedProducts.push(productId);
-      localStorage.setItem(SESSION_VIEWED_PRODUCTS_KEY, JSON.stringify(viewedProducts));
-    }
-    
-    // Send to backend
-    await apiRequest('POST', '/api/record-product-view', {
-      productId,
-      userId,
-      sessionId
-    });
+    const item = {
+      data,
+      expiry: Date.now() + duration
+    };
+    localStorage.setItem(key, JSON.stringify(item));
   } catch (error) {
-    console.error('Error recording product view:', error);
+    console.error('Error caching data:', error);
   }
 }
 
-/**
- * Get list of products viewed in this session
- */
-export function getViewedProducts(): number[] {
+function getCachedData(key: string): any | null {
+  if (!localStorage) return null;
+  
   try {
-    const viewedProductsStr = localStorage.getItem(SESSION_VIEWED_PRODUCTS_KEY);
-    if (viewedProductsStr) {
-      return JSON.parse(viewedProductsStr) as number[];
+    const item = localStorage.getItem(key);
+    if (!item) return null;
+    
+    const parsedItem = JSON.parse(item);
+    if (Date.now() > parsedItem.expiry) {
+      localStorage.removeItem(key);
+      return null;
     }
-    return [];
+    
+    return parsedItem.data;
   } catch (error) {
-    console.error('Error getting viewed products:', error);
-    return [];
+    console.error('Error retrieving cached data:', error);
+    return null;
   }
 }
 
-/**
- * Get personalized offers for the product page
- * @param currentProductId Currently viewed product
- * @param userId User ID if logged in
- * @returns Personalized offers response
- */
+// Get personalized offers based on current product and user
 export async function getPersonalizedOffers(
-  currentProductId: number,
+  productId: number,
   userId?: number
 ): Promise<PersonalizedOffersResponse> {
+  // Try to use cached data first to reduce API calls (important for free tiers)
+  const cacheKey = `offers_${productId}_${userId || 'guest'}`;
+  const cachedOffers = getCachedData(cacheKey);
+  
+  if (cachedOffers) {
+    return cachedOffers;
+  }
+  
   try {
-    const viewedProductIds = getViewedProducts();
-    
-    const response = await apiRequest('POST', '/api/personalized-offers', {
-      currentProductId,
-      viewedProductIds,
-      userId,
-      position: 'product_page'
+    // Optimized request with minimal payload
+    const response = await apiRequest('POST', '/api/funnel/personalized-offers', {
+      productId,
+      userId: userId || null,
+      source: 'product_page'
     });
     
-    return await response.json();
+    const data = await response.json();
+    
+    // Cache the results to minimize API usage
+    setCachedData(cacheKey, data, CACHE_DURATIONS.PERSONALIZED_OFFERS);
+    
+    return data;
   } catch (error) {
-    console.error('Error getting personalized offers:', error);
-    // Return empty default
+    console.error('Error fetching personalized offers:', error);
+    
+    // Return fallback offers to ensure sales funnel continues working
+    // This is critical for guaranteed daily sales
     return {
-      segmentId: '',
-      funnelStepId: '',
-      cta: 'View Details',
-      message: 'You might also like these products',
-      offers: []
+      offers: FALLBACK_OFFERS,
+      message: "Recommended Products For You",
+      cta: "View Details"
     };
   }
 }
 
-/**
- * Get personalized product recommendations
- * @param currentProductId Currently viewed product
- * @param userId User ID if logged in
- * @param limit Number of recommendations to fetch
- * @returns Product recommendations
- */
-export async function getPersonalizedRecommendations(
-  currentProductId?: number,
-  userId?: number,
-  limit: number = 4
-): Promise<RecommendationsResponse> {
-  try {
-    const viewedProductIds = getViewedProducts();
-    
-    const response = await apiRequest('POST', '/api/personalized-recommendations', {
-      currentProductId,
-      viewedProductIds,
-      userId,
-      limit
-    });
-    
-    return await response.json();
-  } catch (error) {
-    console.error('Error getting personalized recommendations:', error);
-    return {
-      recommendations: []
-    };
-  }
-}
-
-/**
- * Get cart recommendations (cross-sells or upsells)
- * @param cartItems Items in the cart
- * @param userId User ID if logged in
- * @returns Cart recommendations
- */
-export async function getCartRecommendations(
-  cartItems: { productId: number; quantity: number }[],
-  userId?: number
-): Promise<CartRecommendationsResponse> {
-  try {
-    const sessionId = localStorage.getItem('session_id');
-    
-    const response = await apiRequest('POST', '/api/cart-recommendations', {
-      cartItems,
-      userId,
-      sessionId
-    });
-    
-    return await response.json();
-  } catch (error) {
-    console.error('Error getting cart recommendations:', error);
-    return {
-      segmentId: '',
-      recommendations: []
-    };
-  }
-}
-
-/**
- * Get checkout offers (last chance upsells)
- * @param cartItems Items in cart
- * @param userId User ID if logged in
- * @returns Checkout offers
- */
+// Get optimized checkout offers based on cart contents
 export async function getCheckoutOffers(
-  cartItems: { productId: number; quantity: number }[],
+  cartItems: { productId: number, quantity: number }[],
   userId?: number
 ): Promise<CheckoutOffersResponse> {
+  // Build cache key based on cart contents
+  const cartKey = cartItems
+    .map(item => `${item.productId}:${item.quantity}`)
+    .sort()
+    .join('-');
+  
+  const cacheKey = `checkout_${cartKey}_${userId || 'guest'}`;
+  const cachedOffers = getCachedData(cacheKey);
+  
+  if (cachedOffers) {
+    return cachedOffers;
+  }
+  
   try {
-    const sessionId = localStorage.getItem('session_id');
-    
-    const response = await apiRequest('POST', '/api/checkout-offers', {
+    const response = await apiRequest('POST', '/api/funnel/checkout-offers', {
       cartItems,
-      userId,
-      sessionId
+      userId: userId || null
     });
     
-    return await response.json();
+    const data = await response.json();
+    
+    // Cache checkout offers
+    setCachedData(cacheKey, data, CACHE_DURATIONS.CHECKOUT_OFFERS);
+    
+    return data;
   } catch (error) {
-    console.error('Error getting checkout offers:', error);
+    console.error('Error fetching checkout offers:', error);
+    
+    // Return fallback checkout offers
     return {
-      offers: []
+      offers: FALLBACK_CHECKOUT_OFFERS
     };
   }
 }
 
-/**
- * Get order confirmation offers and recommendations
- * @param orderId Order ID
- * @param orderItems Items in order
- * @param userId User ID if logged in
- * @returns Order confirmation offers
- */
-export async function getOrderConfirmationOffers(
-  orderId: number,
-  orderItems: { productId: number }[],
-  userId?: number
-): Promise<OrderConfirmationOffersResponse> {
+// Get user segment for personalized shopping experience
+export async function getUserSegment(
+  userId?: number,
+  browsingHistory: number[] = []
+): Promise<string> {
+  const cacheKey = `segment_${userId || 'guest'}`;
+  const cachedSegment = getCachedData(cacheKey);
+  
+  if (cachedSegment) {
+    return cachedSegment;
+  }
+  
   try {
-    const response = await apiRequest('POST', '/api/order-confirmation-offers', {
-      orderId,
-      orderItems,
-      userId
+    const response = await apiRequest('POST', '/api/funnel/user-segment', {
+      userId: userId || null,
+      browsingHistory
     });
     
-    return await response.json();
+    const data = await response.json();
+    const segment = data.segment || 'general';
+    
+    // Cache segment for longer period to reduce API usage
+    setCachedData(cacheKey, segment, CACHE_DURATIONS.USER_SEGMENT);
+    
+    return segment;
   } catch (error) {
-    console.error('Error getting order confirmation offers:', error);
-    return {
-      segmentId: '',
-      nextPurchaseOffer: {
-        discountCode: '',
-        discountValue: 0,
-        discountType: 'percentage',
-        validDays: 0,
-        message: 'Thank you for your purchase!'
-      },
-      recommendations: []
-    };
+    console.error('Error determining user segment:', error);
+    return 'general';
   }
 }
 
-/**
- * Record order revenue to ensure monthly limit compliance
- * @param orderId Order ID
- * @param amount Order amount
- * @returns Status including whether we're approaching monthly limits
- */
-export async function recordOrderRevenue(
-  orderId: number,
-  amount: number
-): Promise<{
-  success: boolean;
-  withinLimits: boolean;
-  dailyPercentage: number;
-  monthlyPercentage: number;
-  revenueStatus: string;
-}> {
-  try {
-    const response = await apiRequest('POST', '/api/record-order-revenue', {
-      orderId,
-      amount
-    });
-    
-    return await response.json();
-  } catch (error) {
-    console.error('Error recording order revenue:', error);
-    return {
-      success: false,
-      withinLimits: true,
-      dailyPercentage: 0,
-      monthlyPercentage: 0,
-      revenueStatus: 'under_target'
-    };
+// Track product views locally to conserve server resources
+// This strategy is optimized for free tier hosting
+const viewedProducts: Set<number> = new Set();
+
+export function trackProductView(productId: number): void {
+  viewedProducts.add(productId);
+  
+  // Only sync to server periodically to reduce API calls
+  // This batch processing approach is more efficient for free tiers
+  const shouldSync = viewedProducts.size % 5 === 0;
+  
+  if (shouldSync) {
+    try {
+      const productArray = Array.from(viewedProducts);
+      
+      // Fire and forget to avoid waiting for response
+      apiRequest('POST', '/api/analytics/product-views', {
+        productIds: productArray
+      });
+    } catch (error) {
+      // Silent fail - analytics are non-critical
+    }
   }
+}
+
+// Low-resource recommendation engine that works entirely client-side
+// This is a fallback for when API calls are limited
+export function getRelatedProducts(
+  product: { id: number, categoryId?: number, brandId?: number },
+  allProducts: any[]
+): number[] {
+  if (!allProducts || allProducts.length === 0) {
+    return [];
+  }
+  
+  // Simple algorithm that doesn't require heavy computation
+  const sameCategoryProducts = allProducts.filter(
+    p => p.id !== product.id && p.categoryId === product.categoryId
+  );
+  
+  const sameBrandProducts = allProducts.filter(
+    p => p.id !== product.id && p.brandId === product.brandId
+  );
+  
+  // Combine and deduplicate
+  const combinedProducts = [...sameCategoryProducts, ...sameBrandProducts];
+  const uniqueProductIds = Array.from(new Set(combinedProducts.map(p => p.id)));
+  
+  // Return limited result set
+  return uniqueProductIds.slice(0, 3);
 }
