@@ -8,7 +8,7 @@
  * - Efficient database queries
  */
 
-import { Request, Response } from 'express';
+import { Express, Request, Response } from 'express';
 import { storage } from '../storage';
 import { customerSegments, determineFunnelStep, determineCustomerSegment, calculateDynamicPrice, getRecommendedProducts } from '../ai/salesOptimization';
 
@@ -293,3 +293,11 @@ export default {
   getUserSegment: [rateLimit, getUserSegment],
   trackProductViews: [rateLimit, trackProductViews]
 };
+
+// Function to register all funnel routes with the Express app
+export function registerFunnelRoutes(app: Express) {
+  app.post('/api/funnel/personalized-offers', rateLimit, getPersonalizedOffers);
+  app.post('/api/funnel/checkout-offers', rateLimit, getCheckoutOffers);
+  app.post('/api/funnel/user-segment', rateLimit, getUserSegment);
+  app.post('/api/analytics/product-views', rateLimit, trackProductViews);
+}

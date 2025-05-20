@@ -1,688 +1,483 @@
 /**
- * Free-Tier AI-powered sales optimization system for UTV parts e-commerce
- * These tools enable guaranteed daily sales through personalization and optimization
- * Optimized for free hosting tiers with minimal memory usage and efficient processing
+ * AI-driven sales optimization and customer segmentation
+ * 
+ * This system is specifically designed to work with free tier hosting limitations:
+ * - Memory efficient algorithms
+ * - Fallback mechanisms when AI API limits are reached
+ * - Response caching to minimize API calls
+ * - Optimized for latency with asynchronous processing
  */
 
-import OpenAI from "openai";
-import { storage } from "../storage";
-import { Product, Order } from "../../shared/schema";
+import { OpenAI } from 'openai';
+import { storage } from '../storage';
+import { Product } from '../../shared/schema';
 
-// Initialize OpenAI if API key is available with built-in fallback logic
-const openai = process.env.OPENAI_API_KEY ?
-  new OpenAI({ apiKey: process.env.OPENAI_API_KEY }) :
-  null;
+// Initialize OpenAI with fallback handling for API limits
+let openai: OpenAI | null = null;
 
-// Cache for AI responses to minimize API usage and work within free tier limits
-const aiResponseCache: Record<string, {
-  response: any,
-  timestamp: number
+try {
+  if (process.env.OPENAI_API_KEY) {
+    openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  }
+} catch (error) {
+  console.error('OpenAI initialization failed, using fallback recommendations:', error);
+}
+
+// Memory-efficient caching - limited to prevent memory leaks on free hosting
+const recommendationCache: Record<string, { 
+  productIds: number[]; 
+  timestamp: number;
 }> = {};
 
-// Maximum cache age in milliseconds (30 minutes)
-const MAX_CACHE_AGE = 30 * 60 * 1000;
+const MAX_CACHE_SIZE = 100;
+const CACHE_TTL = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
 
-// Memory-efficient cache management
-function getCachedResponse(cacheKey: string): any | null {
-  const cached = aiResponseCache[cacheKey];
-  if (!cached) return null;
-  
-  // Automatic cache invalidation based on age
-  if (Date.now() - cached.timestamp > MAX_CACHE_AGE) {
-    delete aiResponseCache[cacheKey];
-    return null;
-  }
-  
-  return cached.response;
+// Customer segmentation models with behavior patterns
+export type CustomerSegment = 'price_sensitive' | 'feature_focused' | 'brand_loyal' | 'new_visitor' | 'returning_customer';
+
+export interface CustomerData {
+  viewedProducts: number[];
+  purchaseHistory?: number[];
+  cartAbandons?: number[];
+  timeOnSite?: number;
+  deviceType?: string;
+  referrer?: string;
 }
 
-function setCachedResponse(cacheKey: string, response: any): void {
-  // Keep cache size manageable for free hosting
-  const cacheSize = Object.keys(aiResponseCache).length;
-  if (cacheSize > 100) {
-    // Find and remove oldest cache entries if we exceed 100 items
-    const oldestEntries = Object.entries(aiResponseCache)
-      .sort((a, b) => a[1].timestamp - b[1].timestamp)
-      .slice(0, 10)
-      .map(entry => entry[0]);
-    
-    oldestEntries.forEach(key => delete aiResponseCache[key]);
+export const customerSegments = {
+  price_sensitive: {
+    name: 'Price Sensitive',
+    description: 'Customers who prioritize cost over other factors',
+    pricingStrategy: 'Offer discounts and highlight value',
+    recommendationStrategy: 'Recommend lower-priced alternatives and value bundles',
+  },
+  feature_focused: {
+    name: 'Feature Focused',
+    description: 'Customers who seek specific features and performance',
+    pricingStrategy: 'Emphasize performance and unique features, less price sensitivity',
+    recommendationStrategy: 'Recommend premium products with advanced features',
+  },
+  brand_loyal: {
+    name: 'Brand Loyal',
+    description: 'Customers who repeatedly purchase from the same brands',
+    pricingStrategy: 'Brand-focused messaging, less price sensitivity',
+    recommendationStrategy: 'Recommend same-brand accessories and upgrades',
+  },
+  new_visitor: {
+    name: 'New Visitor',
+    description: 'First-time visitors with no purchase history',
+    pricingStrategy: 'Introductory offers to encourage first purchase',
+    recommendationStrategy: 'Recommend popular entry-level products with high conversion rates',
+  },
+  returning_customer: {
+    name: 'Returning Customer',
+    description: 'Customers who have made previous purchases',
+    pricingStrategy: 'Loyalty-based pricing and bundles',
+    recommendationStrategy: 'Recommend complementary products to previous purchases',
   }
-  
-  aiResponseCache[cacheKey] = {
-    response,
-    timestamp: Date.now()
-  };
+};
+
+export enum FunnelStep {
+  BROWSING = 'browsing',
+  PRODUCT_DETAIL = 'product_detail',
+  ADD_TO_CART = 'add_to_cart',
+  CHECKOUT = 'checkout',
+  POST_PURCHASE = 'post_purchase'
 }
 
 /**
- * Personalization and targeting system
+ * Determines the current funnel step for personalized recommendations
+ * Memory-efficient version optimized for free tier hosting
  */
-export interface CustomerSegment {
-  id: string;
-  name: string;
-  description: string;
-  targetProducts: number[]; // Product IDs
-  discountStrategy: "none" | "percentage" | "fixed" | "bundle";
-  discountValue: number;
-  conversionRate: number; // Expected conversion rate
-  messageTemplate: string;
+export function determineFunnelStep(customerData: CustomerData): FunnelStep | null {
+  // No purchase history but viewed products -> Browsing/Detail
+  if (!customerData.purchaseHistory && customerData.viewedProducts?.length > 0) {
+    return customerData.viewedProducts.length > 3 
+      ? FunnelStep.PRODUCT_DETAIL 
+      : FunnelStep.BROWSING;
+  }
+
+  // Has cart abandons -> Add to Cart
+  if (customerData.cartAbandons && customerData.cartAbandons.length > 0) {
+    return FunnelStep.ADD_TO_CART;
+  }
+
+  // Has purchase history -> Post Purchase
+  if (customerData.purchaseHistory && customerData.purchaseHistory.length > 0) {
+    return FunnelStep.POST_PURCHASE;
+  }
+
+  // Default
+  return FunnelStep.BROWSING;
 }
 
-export const customerSegments: CustomerSegment[] = [
-  {
-    id: "recreational-riders",
-    name: "Recreational Riders",
-    description: "Weekend warriors who use UTVs for fun and adventure",
-    targetProducts: [1, 3, 6, 7, 8], // Product IDs that appeal to this segment
-    discountStrategy: "percentage",
-    discountValue: 10,
-    conversionRate: 0.068, // 6.8% conversion rate
-    messageTemplate: "Upgrade your weekend adventures with premium UTV gear. Limited time: {{discount}}% off!"
-  },
-  {
-    id: "performance-enthusiasts",
-    name: "Performance Enthusiasts",
-    description: "Riders focused on speed, power, and performance upgrades",
-    targetProducts: [1, 2, 3, 5, 6, 8],
-    discountStrategy: "bundle",
-    discountValue: 15,
-    conversionRate: 0.072, // 7.2% conversion rate
-    messageTemplate: "Boost your UTV's performance with pro-grade upgrades. Buy 2+ items: Save {{discount}}%!"
-  },
-  {
-    id: "utility-workers",
-    name: "Utility Workers",
-    description: "Users who rely on UTVs for work and practical purposes",
-    targetProducts: [2, 4, 9, 10],
-    discountStrategy: "fixed",
-    discountValue: 25,
-    conversionRate: 0.059, // 5.9% conversion rate
-    messageTemplate: "Hard-working UTV parts for hard-working people. ${{discount}} off orders over $200!"
-  },
-  {
-    id: "mud-riders",
-    name: "Mud Enthusiasts",
-    description: "Riders who specifically enjoy mudding and require specialized gear",
-    targetProducts: [1, 2, 5, 9],
-    discountStrategy: "percentage",
-    discountValue: 12,
-    conversionRate: 0.081, // 8.1% conversion rate
-    messageTemplate: "Dominate the mud with purpose-built UTV components. {{discount}}% off mud-ready gear!"
-  },
-  {
-    id: "new-owners",
-    name: "New UTV Owners",
-    description: "Recent purchasers looking for initial accessories and upgrades",
-    targetProducts: [4, 7, 8, 10],
-    discountStrategy: "bundle",
-    discountValue: 20,
-    conversionRate: 0.093, // 9.3% conversion rate - highest converting segment
-    messageTemplate: "New to UTV riding? Essential upgrades for new owners: Buy 3+ items for {{discount}}% off!"
-  }
-];
-
 /**
- * Determines the best customer segment for a specific user
- * @param userId User ID (if logged in)
- * @param browsedProductIds Products the user has viewed (IDs)
- * @returns The best matching customer segment for personalization
+ * Determines customer segment based on browsing and purchase history
+ * Using rule-based fallback when AI is unavailable
  */
-export async function determineCustomerSegment(
-  userId: number | null,
-  browsedProductIds: number[]
-): Promise<CustomerSegment> {
-  // Default to new owners if we have no data
-  if (!userId && (!browsedProductIds || browsedProductIds.length === 0)) {
-    return customerSegments.find(s => s.id === "new-owners")!;
-  }
+export async function determineCustomerSegment(customerData: CustomerData): Promise<CustomerSegment> {
+  // AI-based segmentation with OpenAI
+  if (openai) {
+    try {
+      const prompt = `
+        Analyze this customer data and determine their segment:
+        - Viewed Products: ${customerData.viewedProducts?.length || 0} products
+        - Purchase History: ${customerData.purchaseHistory?.length || 0} purchases
+        - Cart Abandons: ${customerData.cartAbandons?.length || 0} abandons
+        - Time on Site: ${customerData.timeOnSite || 0} seconds
+        - Device: ${customerData.deviceType || 'unknown'}
+        - Referrer: ${customerData.referrer || 'direct'}
 
-  try {
-    // Get browsed products data
-    const browsedProducts = await Promise.all(
-      browsedProductIds.map(id => storage.getProductById(id))
-    );
-    const validProducts = browsedProducts.filter(p => p !== undefined) as Product[];
+        Respond with only one of these segments: price_sensitive, feature_focused, brand_loyal, new_visitor, returning_customer.
+      `;
 
-    // Get user's previous orders if logged in
-    let previousOrders: Order[] = [];
-    if (userId) {
-      previousOrders = await storage.getOrdersByUserId(userId);
-    }
+      const response = await openai.chat.completions.create({
+        model: "gpt-4o", // the newest OpenAI model is "gpt-4o" which was released May 13, 2024. do not change this unless explicitly requested by the user
+        messages: [
+          { role: "system", content: "You are a customer segmentation expert. Analyze the data and respond with exactly one word that represents the customer segment." },
+          { role: "user", content: prompt }
+        ],
+        max_tokens: 50,
+        temperature: 0.3,
+      });
 
-    // Use AI to analyze behavior if OpenAI is available
-    if (openai && (validProducts.length > 0 || previousOrders.length > 0)) {
-      try {
-        // Extract relevant product categories and behavior
-        const viewedCategories = validProducts.map(p => p.categoryId);
-        
-        // Create a summary of previous purchases
-        const purchaseSummary = previousOrders.length > 0 
-          ? `Previous orders: ${previousOrders.length} orders with items like ${previousOrders.flatMap(order => 
-              order.orderItems?.map(item => item.productId) || []
-            ).join(', ')}`
-          : 'No previous purchase history';
-        
-        // Prepare prompt for OpenAI
-        const segmentPrompt = `
-          Analyze this UTV customer data and determine the best customer segment match from the following options:
-          1. Recreational Riders: Weekend warriors who use UTVs for fun and adventure
-          2. Performance Enthusiasts: Riders focused on speed, power, and performance upgrades
-          3. Utility Workers: Users who rely on UTVs for work and practical purposes
-          4. Mud Enthusiasts: Riders who specifically enjoy mudding and require specialized gear
-          5. New UTV Owners: Recent purchasers looking for initial accessories and upgrades
-
-          Customer Data:
-          - Viewed product categories: ${viewedCategories.join(', ')}
-          - Browsing history: ${validProducts.map(p => p.name).join(', ')}
-          - ${purchaseSummary}
-          
-          Respond with the exact segment name that best matches this customer profile.
-        `;
-
-        // Query OpenAI for segment prediction
-        const completion = await openai.chat.completions.create({
-          model: "gpt-4o", // the newest OpenAI model is "gpt-4o" which was released May 13, 2024
-          messages: [{
-            role: "user",
-            content: segmentPrompt
-          }],
-          max_tokens: 50
-        });
-
-        const predictedSegmentName = completion.choices[0].message.content?.trim();
-        
-        // Match to our defined segments
-        const matchedSegment = customerSegments.find(
-          s => s.name.toLowerCase() === predictedSegmentName?.toLowerCase()
-        );
-        
-        if (matchedSegment) {
-          return matchedSegment;
-        }
-      } catch (error) {
-        console.error("Error determining customer segment with AI:", error);
+      const segmentText = response.choices[0].message.content?.trim().toLowerCase();
+      
+      // Validate that response is one of our segments
+      if (segmentText && Object.keys(customerSegments).includes(segmentText)) {
+        return segmentText as CustomerSegment;
       }
-    }
-
-    // Fallback to behavior-based logic if AI fails
-    const categoryViews: Record<number, number> = {};
-    validProducts.forEach(product => {
-      categoryViews[product.categoryId] = (categoryViews[product.categoryId] || 0) + 1;
-    });
-
-    // Identify dominant category
-    let dominantCategory = 0;
-    let maxViews = 0;
-    
-    for (const [category, views] of Object.entries(categoryViews)) {
-      if (views > maxViews) {
-        maxViews = views;
-        dominantCategory = parseInt(category);
-      }
-    }
-
-    // Match category to segment
-    switch (dominantCategory) {
-      case 3: // Wheels & Tires
-      case 6: // Audio & Electronics
-        return customerSegments.find(s => s.id === "recreational-riders")!;
-      
-      case 2: // Drivetrain & Axles
-      case 8: // Performance
-        return customerSegments.find(s => s.id === "performance-enthusiasts")!;
-      
-      case 5: // Storage & Cargo
-      case 9: // Plows & Implements
-        return customerSegments.find(s => s.id === "utility-workers")!;
-      
-      case 1: // Suspension & Lift Kits
-        return customerSegments.find(s => s.id === "mud-riders")!;
-      
-      default:
-        return customerSegments.find(s => s.id === "new-owners")!;
-    }
-  } catch (error) {
-    console.error("Error in customer segmentation:", error);
-    return customerSegments.find(s => s.id === "new-owners")!;
-  }
-}
-
-/**
- * Click Funnel Optimization
- */
-export interface FunnelStep {
-  id: string;
-  name: string;
-  description: string;
-  cta: string;
-  position: "product_page" | "cart" | "checkout" | "order_confirmation";
-  offerType: "cross_sell" | "upsell" | "bundle" | "discount";
-  targetSegments: string[]; // Segment IDs
-  conversionRate: number;
-  productAssociations: {
-    triggerProducts: number[];
-    offerProducts: number[];
-  };
-}
-
-export const funnelSteps: FunnelStep[] = [
-  {
-    id: "protection-bundle",
-    name: "Protection Bundle",
-    description: "Add protective gear to your UTV parts",
-    cta: "Add Protection Package",
-    position: "product_page",
-    offerType: "bundle",
-    targetSegments: ["recreational-riders", "new-owners"],
-    conversionRate: 0.28,
-    productAssociations: {
-      triggerProducts: [1, 3, 5, 6, 8], // When these products are viewed
-      offerProducts: [4, 7]  // Offer these products
-    }
-  },
-  {
-    id: "performance-upsell",
-    name: "Performance Upgrade",
-    description: "Upgrade to higher performance option",
-    cta: "Upgrade for Maximum Performance",
-    position: "product_page",
-    offerType: "upsell",
-    targetSegments: ["performance-enthusiasts", "mud-riders"],
-    conversionRate: 0.18,
-    productAssociations: {
-      triggerProducts: [1, 2, 5, 9],
-      offerProducts: [1, 3, 8]
-    }
-  },
-  {
-    id: "essential-accessory",
-    name: "Essential Accessories",
-    description: "Add must-have accessories before checkout",
-    cta: "Complete Your Purchase",
-    position: "cart",
-    offerType: "cross_sell",
-    targetSegments: ["recreational-riders", "new-owners", "utility-workers"],
-    conversionRate: 0.38, // High conversion rate at cart level
-    productAssociations: {
-      triggerProducts: [1, 2, 3, 5, 6, 8, 9],
-      offerProducts: [4, 7, 10]
-    }
-  },
-  {
-    id: "last-chance-upgrade",
-    name: "Last Chance Upgrade",
-    description: "One-time offer before completing purchase",
-    cta: "Add to Order",
-    position: "checkout",
-    offerType: "cross_sell",
-    targetSegments: ["performance-enthusiasts", "mud-riders", "recreational-riders"],
-    conversionRate: 0.22,
-    productAssociations: {
-      triggerProducts: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], // Any product
-      offerProducts: [10, 4, 7] // Maintenance, storage items
-    }
-  },
-  {
-    id: "loyalty-discount",
-    name: "Loyalty Reward",
-    description: "Special offer for next purchase",
-    cta: "Claim Your Discount",
-    position: "order_confirmation",
-    offerType: "discount",
-    targetSegments: ["recreational-riders", "performance-enthusiasts", "utility-workers", "mud-riders", "new-owners"],
-    conversionRate: 0.32,
-    productAssociations: {
-      triggerProducts: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], // Any product
-      offerProducts: [] // No specific products, general discount
+    } catch (error) {
+      console.error('AI segmentation error, using fallback:', error);
+      // Fallback to rule-based on error/API limit
     }
   }
-];
 
-/**
- * Determines the best funnel steps for a given user segment and viewed product
- * @param segment The user's segment
- * @param viewedProductId The product currently being viewed
- * @param position Current position in the funnel
- * @returns The optimal funnel step to present
- */
-export function determineFunnelStep(
-  segment: CustomerSegment,
-  viewedProductId: number,
-  position: FunnelStep["position"]
-): FunnelStep | null {
-  // Filter steps by position and segment targeting
-  const eligibleSteps = funnelSteps.filter(step => 
-    step.position === position && 
-    step.targetSegments.includes(segment.id)
-  );
-  
-  if (eligibleSteps.length === 0) {
-    return null;
+  // Rule-based segmentation fallback - critical for free tier hosting
+  if (customerData.purchaseHistory && customerData.purchaseHistory.length > 0) {
+    return 'returning_customer';
   }
   
-  // Further filter by product associations
-  const matchingSteps = eligibleSteps.filter(step => 
-    step.productAssociations.triggerProducts.includes(viewedProductId)
-  );
-  
-  if (matchingSteps.length > 0) {
-    // Sort by conversion rate (highest first)
-    return matchingSteps.sort((a, b) => b.conversionRate - a.conversionRate)[0];
+  if (customerData.cartAbandons && customerData.cartAbandons.length > 0) {
+    return 'price_sensitive';
   }
   
-  // If no specific product match, return best converting eligible step
-  return eligibleSteps.sort((a, b) => b.conversionRate - a.conversionRate)[0];
-}
-
-/**
- * Gets recommended products for a funnel step
- * @param step The funnel step
- * @param limit Maximum number of products to return
- * @returns Array of recommended products
- */
-export async function getRecommendedProducts(
-  step: FunnelStep,
-  limit: number = 3
-): Promise<Product[]> {
-  try {
-    // Get all products that are configured for this funnel step
-    const recommendedProducts: Product[] = [];
-    
-    for (const productId of step.productAssociations.offerProducts) {
-      const product = await storage.getProductById(productId);
-      if (product) {
-        recommendedProducts.push(product);
-      }
-    }
-    
-    // Sort by margin (highest margin first) to maximize profits
-    const sortedProducts = recommendedProducts.sort((a, b) => {
-      // Calculate margin percentage
-      const aPrice = typeof a.price === 'string' ? parseFloat(a.price) : a.price;
-      const bPrice = typeof b.price === 'string' ? parseFloat(b.price) : b.price;
-      
-      const aCompare = a.compareAtPrice ? 
-        (typeof a.compareAtPrice === 'string' ? parseFloat(a.compareAtPrice) : a.compareAtPrice) : 0;
-      
-      const bCompare = b.compareAtPrice ? 
-        (typeof b.compareAtPrice === 'string' ? parseFloat(b.compareAtPrice) : b.compareAtPrice) : 0;
-      
-      const aMargin = (aPrice - aCompare) / aPrice;
-      const bMargin = (bPrice - bCompare) / bPrice;
-      
-      return bMargin - aMargin;
-    });
-    
-    // Return top N products
-    return sortedProducts.slice(0, limit);
-  } catch (error) {
-    console.error("Error getting recommended products:", error);
-    return [];
+  if (customerData.viewedProducts && customerData.viewedProducts.length > 5) {
+    return 'feature_focused';
   }
+  
+  return 'new_visitor';
 }
 
 /**
- * Dynamic pricing optimization
- */
-export interface DynamicPricing {
-  segmentId: string;
-  categoryId: number;
-  baseMarkupPercentage: number;
-  minimumMarginPercentage: number;
-  popularityBoost: number;
-  lowInventoryBoost: number;
-}
-
-export const dynamicPricingRules: DynamicPricing[] = [
-  {
-    segmentId: "performance-enthusiasts",
-    categoryId: 1, // Suspension & Lift Kits
-    baseMarkupPercentage: 40, // 40% markup
-    minimumMarginPercentage: 25, // Minimum 25% profit margin
-    popularityBoost: 5, // Extra 5% for popular items
-    lowInventoryBoost: 8 // Extra 8% for low inventory items
-  },
-  {
-    segmentId: "mud-riders",
-    categoryId: 1, // Suspension & Lift Kits
-    baseMarkupPercentage: 45, // 45% markup
-    minimumMarginPercentage: 30, // Minimum 30% profit margin
-    popularityBoost: 10, // Extra 10% for popular items
-    lowInventoryBoost: 10 // Extra 10% for low inventory items
-  },
-  {
-    segmentId: "recreational-riders",
-    categoryId: 3, // Wheels & Tires
-    baseMarkupPercentage: 35, // 35% markup
-    minimumMarginPercentage: 20, // Minimum 20% profit margin
-    popularityBoost: 5, // Extra 5% for popular items 
-    lowInventoryBoost: 5 // Extra 5% for low inventory items
-  },
-  {
-    segmentId: "utility-workers",
-    categoryId: 5, // Storage & Cargo
-    baseMarkupPercentage: 30, // 30% markup
-    minimumMarginPercentage: 15, // Minimum 15% profit margin
-    popularityBoost: 3, // Extra 3% for popular items
-    lowInventoryBoost: 5 // Extra 5% for low inventory items
-  }
-];
-
-/**
- * Calculates dynamic pricing for a product based on segment and product data
- * @param product The product to price
- * @param segment The customer segment
- * @returns Object with original and dynamically calculated price
+ * Calculates dynamic pricing based on customer segment, inventory, and demand
+ * Uses memory-efficient algorithm optimized for free tier hosting
  */
 export function calculateDynamicPrice(
-  product: Product, 
-  segment: CustomerSegment
-): { originalPrice: number | string, dynamicPrice: number | string } {
-  // Get base price (we'll simulate a base cost as 60% of listed price if cost isn't available)
-  const basePrice = typeof product.price === 'string' ? parseFloat(product.price) : product.price;
-  const baseCost = basePrice * 0.6; // Estimated cost if not available
-  
-  // Find applicable pricing rule
-  const pricingRule = dynamicPricingRules.find(
-    rule => rule.segmentId === segment.id && rule.categoryId === product.categoryId
-  );
-  
-  if (!pricingRule) {
-    // No special pricing rule, return original price
-    return {
-      originalPrice: product.price,
-      dynamicPrice: product.price
-    };
-  }
-  
-  // Calculate dynamic price based on rules
-  let calculatedPrice = baseCost * (1 + (pricingRule.baseMarkupPercentage / 100));
-  
-  // Apply popularity boost if product is popular
-  if (product.isPopular) {
-    calculatedPrice *= (1 + (pricingRule.popularityBoost / 100));
-  }
-  
-  // Apply inventory boost if inventory is low (less than 10 units)
-  if (product.inventoryCount < 10) {
-    calculatedPrice *= (1 + (pricingRule.lowInventoryBoost / 100));
-  }
-  
-  // Ensure minimum margin
-  const minimumPrice = baseCost * (1 + (pricingRule.minimumMarginPercentage / 100));
-  calculatedPrice = Math.max(calculatedPrice, minimumPrice);
-  
-  // Round to .99
-  calculatedPrice = Math.floor(calculatedPrice) + 0.99;
-  
-  return {
-    originalPrice: product.price,
-    dynamicPrice: calculatedPrice
+  basePrice: number, 
+  segment: CustomerSegment, 
+  inventoryLevel: number, 
+  demandScore: number
+): number {
+  // Base price adjustments by segment
+  const segmentMultipliers = {
+    price_sensitive: 0.95, // 5% discount
+    feature_focused: 1.05, // 5% markup
+    brand_loyal: 1.0,      // standard pricing
+    new_visitor: 0.97,     // 3% discount to encourage first purchase
+    returning_customer: 1.02, // 2% loyalty markup
   };
+
+  // Inventory adjustments - lower inventory increases price
+  const inventoryFactor = Math.max(0.9, Math.min(1.1, 1 - (inventoryLevel - 50) / 500));
+  
+  // Demand adjustments - higher demand increases price
+  const demandFactor = Math.max(0.95, Math.min(1.15, 1 + (demandScore - 50) / 300));
+  
+  // Calculate final price with constraints to prevent extremes
+  const adjustedPrice = basePrice * segmentMultipliers[segment] * inventoryFactor * demandFactor;
+  
+  // Never go below 90% or above 115% of base price
+  const finalPrice = Math.max(basePrice * 0.9, Math.min(basePrice * 1.15, adjustedPrice));
+  
+  // Round to nearest $0.99 for psychological pricing
+  return Math.floor(finalPrice) + 0.99;
 }
 
 /**
- * AI-powered product recommendation engine
+ * Gets personalized product recommendations based on customer data and viewed products
+ * Includes fallback for when AI API limits are reached
  */
-export async function getPersonalizedRecommendations(
-  userId: number | null,
-  viewedProductIds: number[],
-  currentProductId?: number,
+export async function getRecommendedProducts(
+  customerData: CustomerData, 
+  currentProductId?: number, 
   limit: number = 4
-): Promise<Product[]> {
+): Promise<number[]> {
+  const cacheKey = `${currentProductId}-${customerData.viewedProducts?.join(',')}-${limit}`;
+  
+  // Check cache first to avoid API calls
+  const cached = recommendationCache[cacheKey];
+  if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+    return cached.productIds;
+  }
+  
+  // Manage cache size for memory efficiency
+  if (Object.keys(recommendationCache).length >= MAX_CACHE_SIZE) {
+    // Remove oldest cached item
+    const oldestKey = Object.keys(recommendationCache).reduce((oldest, key) => {
+      return recommendationCache[key].timestamp < recommendationCache[oldest].timestamp ? key : oldest;
+    }, Object.keys(recommendationCache)[0]);
+    
+    delete recommendationCache[oldestKey];
+  }
+  
+  // Try AI-based recommendations if available
+  if (openai && currentProductId) {
+    try {
+      // Get current product data
+      const product = await storage.getProductById(currentProductId);
+      
+      if (product) {
+        // Get customer segment
+        const segment = await determineCustomerSegment(customerData);
+        
+        // Generate AI-driven recommendations
+        let prompt = `
+          As a UTV parts recommendation system, suggest ${limit} products that would pair well with this item:
+          - Current Product: ${product.name}
+          - Description: ${product.description}
+          - Category: ${product.categoryId ? 'Category ' + product.categoryId : 'Uncategorized'}
+          - Brand: ${product.brandId ? 'Brand ' + product.brandId : 'Generic'}
+          - Price: $${product.price}
+          - Customer Segment: ${customerSegments[segment].name}
+          
+          Context: This customer has viewed ${customerData.viewedProducts?.length || 0} products
+          and made ${customerData.purchaseHistory?.length || 0} previous purchases.
+          
+          Response format: Return ONLY a JSON array of product IDs, with no explanation.
+          Example: [12, 45, 23, 67]
+        `;
+        
+        const response = await openai.chat.completions.create({
+          model: "gpt-4o", // the newest OpenAI model is "gpt-4o" which was released May 13, 2024. do not change this unless explicitly requested by the user
+          messages: [
+            { role: "system", content: "You are a UTV parts recommendation specialist. Respond with only the JSON array of recommended product IDs." },
+            { role: "user", content: prompt }
+          ],
+          response_format: { type: "json_object" },
+          max_tokens: 150,
+          temperature: 0.2,
+        });
+        
+        const content = response.choices[0].message.content;
+        if (content) {
+          try {
+            const parsed = JSON.parse(content);
+            if (Array.isArray(parsed.recommendations) && parsed.recommendations.length > 0) {
+              // Cache the results
+              recommendationCache[cacheKey] = {
+                productIds: parsed.recommendations.slice(0, limit),
+                timestamp: Date.now()
+              };
+              
+              return parsed.recommendations.slice(0, limit);
+            }
+          } catch (parseError) {
+            console.error('Failed to parse AI recommendation response:', parseError);
+          }
+        }
+      }
+    } catch (error) {
+      console.error('AI recommendation error, using fallback:', error);
+    }
+  }
+  
+  // Fallback: Rule-based recommendations
+  // This is crucial for free tier hosting with API limits
+  return getRuleBasedRecommendations(customerData, currentProductId, limit);
+}
+
+/**
+ * Fallback recommendation system when AI is unavailable or API limits are reached
+ * Optimized for low memory usage on free tier hosting
+ */
+async function getRuleBasedRecommendations(
+  customerData: CustomerData, 
+  currentProductId?: number, 
+  limit: number = 4
+): Promise<number[]> {
+  const recommendations: number[] = [];
+  
   try {
-    // Get user segment
-    const segment = await determineCustomerSegment(userId, viewedProductIds);
-    
-    // Get target products for that segment
-    const targetProducts = segment.targetProducts;
-    
-    // Mix in some products from current product category if available
-    let recommendedProductIds = [...targetProducts];
+    // Get products for rule-based filtering
+    const { products } = await storage.getProducts({ limit: 50 });
     
     if (currentProductId) {
       const currentProduct = await storage.getProductById(currentProductId);
+      
       if (currentProduct) {
-        // Get products from same category
-        const categoryProducts = await storage.getProducts({ 
-          categoryId: currentProduct.categoryId,
-          limit: 5
-        });
+        // Find products in same category
+        const sameCategoryProducts = products.filter(p => 
+          p.id !== currentProductId && 
+          p.categoryId === currentProduct.categoryId
+        );
         
-        // Add these product IDs if they're not already in the list
-        categoryProducts.products.forEach(product => {
-          if (!recommendedProductIds.includes(product.id) && product.id !== currentProductId) {
-            recommendedProductIds.push(product.id);
-          }
-        });
+        // Add up to 2 same-category products
+        for (let i = 0; i < Math.min(2, sameCategoryProducts.length); i++) {
+          recommendations.push(sameCategoryProducts[i].id);
+        }
+        
+        // Add complementary products (different category, similar price range)
+        const priceMin = parseFloat(currentProduct.price) * 0.7;
+        const priceMax = parseFloat(currentProduct.price) * 1.3;
+        
+        const complementaryProducts = products.filter(p => 
+          p.id !== currentProductId && 
+          p.categoryId !== currentProduct.categoryId &&
+          parseFloat(p.price) >= priceMin &&
+          parseFloat(p.price) <= priceMax &&
+          !recommendations.includes(p.id)
+        );
+        
+        // Add up to 2 complementary products
+        for (let i = 0; i < Math.min(2, complementaryProducts.length); i++) {
+          recommendations.push(complementaryProducts[i].id);
+        }
       }
     }
     
-    // Get full product data for recommendations
-    const recommendations: Product[] = [];
-    for (const productId of recommendedProductIds) {
-      const product = await storage.getProductById(productId);
-      if (product) {
-        recommendations.push(product);
-      }
+    // If we still need more recommendations, add top-rated products
+    if (recommendations.length < limit) {
+      const topProducts = products
+        .filter(p => !recommendations.includes(p.id) && p.id !== currentProductId)
+        .sort((a, b) => {
+          const aRating = a.reviewCount ? (a.averageRating || 0) : 0;
+          const bRating = b.reviewCount ? (b.averageRating || 0) : 0;
+          return bRating - aRating;
+        })
+        .slice(0, limit - recommendations.length);
+      
+      recommendations.push(...topProducts.map(p => p.id));
     }
     
-    // Sort by relevance to the segment (products specifically targeted to this segment first)
-    const sortedRecommendations = recommendations.sort((a, b) => {
-      const aIsTargeted = segment.targetProducts.includes(a.id) ? 1 : 0;
-      const bIsTargeted = segment.targetProducts.includes(b.id) ? 1 : 0;
-      
-      if (aIsTargeted !== bIsTargeted) {
-        return bIsTargeted - aIsTargeted; // Targeted products first
-      }
-      
-      // Then by popularity and rating
-      if (a.isPopular !== b.isPopular) {
-        return a.isPopular ? -1 : 1; // Popular products first
-      }
-      
-      return (b.rating || 0) - (a.rating || 0); // Higher rated products first
-    });
+    // Cache the results
+    if (currentProductId) {
+      const cacheKey = `${currentProductId}-${customerData.viewedProducts?.join(',')}-${limit}`;
+      recommendationCache[cacheKey] = {
+        productIds: recommendations.slice(0, limit),
+        timestamp: Date.now()
+      };
+    }
     
-    // Return limited number of recommendations
-    return sortedRecommendations.slice(0, limit);
+    return recommendations.slice(0, limit);
   } catch (error) {
-    console.error("Error getting personalized recommendations:", error);
+    console.error('Rule-based recommendation error:', error);
     return [];
   }
 }
 
 /**
- * Maximum Revenue Management
- * Ensures daily revenue stays below $500,000 USD monthly
+ * Gets upsell offers optimized for checkout conversion
+ * Memory-efficient implementation for free tier hosting
  */
+export async function getCheckoutUpsells(
+  cartProductIds: number[], 
+  customerData: CustomerData, 
+  limit: number = 2
+): Promise<number[]> {
+  // Use cached recommendations if available
+  const cacheKey = `checkout-${cartProductIds.join(',')}-${limit}`;
+  const cached = recommendationCache[cacheKey];
+  
+  if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+    return cached.productIds;
+  }
+  
+  try {
+    // Get cart products
+    const cartProducts: Product[] = [];
+    for (const id of cartProductIds) {
+      const product = await storage.getProductById(id);
+      if (product) cartProducts.push(product);
+    }
+    
+    // Calculate average cart price
+    const totalPrice = cartProducts.reduce((sum, product) => sum + parseFloat(product.price), 0);
+    const averagePrice = totalPrice / cartProducts.length;
+    
+    // Get upsell candidates - accessories under 30% of cart average
+    const { products } = await storage.getProducts({ 
+      limit: 20,
+      isFeatured: true
+    });
+    
+    const upsellCandidates = products.filter(p => 
+      !cartProductIds.includes(p.id) && 
+      parseFloat(p.price) < averagePrice * 0.3
+    );
+    
+    // Select upsells based on complementary categories
+    const cartCategories = new Set(cartProducts.map(p => p.categoryId).filter(Boolean));
+    const complementaryUpsells = upsellCandidates.filter(p => !cartCategories.has(p.categoryId));
+    
+    // Final upsell selection
+    const upsells = complementaryUpsells.length >= limit
+      ? complementaryUpsells.slice(0, limit)
+      : [...complementaryUpsells, ...upsellCandidates.filter(p => !complementaryUpsells.includes(p))].slice(0, limit);
+    
+    const result = upsells.map(p => p.id);
+    
+    // Cache results
+    recommendationCache[cacheKey] = {
+      productIds: result,
+      timestamp: Date.now()
+    };
+    
+    return result;
+  } catch (error) {
+    console.error('Checkout upsell error:', error);
+    return [];
+  }
+}
 
-// Revenue cap management object
-export const revenueManager = {
-  dailyRevenue: 0,
-  monthlyRevenue: 0,
-  lastReset: new Date(),
-  maxMonthlyRevenue: 500000, // $500,000 USD monthly limit
-  maxDailyRevenue: 500000 / 30, // ~$16,667 daily limit
-  
-  // Add revenue from a new order
-  addRevenue(amount: number): boolean {
-    // Check if we need to reset daily counter
-    const now = new Date();
-    if (now.getDate() !== this.lastReset.getDate()) {
-      this.dailyRevenue = 0;
-      this.lastReset = now;
-      
-      // If it's a new month, reset monthly counter too
-      if (now.getMonth() !== this.lastReset.getMonth()) {
-        this.monthlyRevenue = 0;
-      }
+/**
+ * Gets bundle offers optimized for average order value increases
+ * Designed to scale on free tier hosting
+ */
+export async function getBundleOffers(
+  productId: number, 
+  customerData: CustomerData
+): Promise<{ bundleItems: number[], discountPercent: number }> {
+  try {
+    // Get main product
+    const product = await storage.getProductById(productId);
+    if (!product) {
+      return { bundleItems: [], discountPercent: 0 };
     }
     
-    // Add revenue
-    this.dailyRevenue += amount;
-    this.monthlyRevenue += amount;
+    // Get complementary products
+    const recommendations = await getRecommendedProducts(customerData, productId, 3);
     
-    // Check if we're exceeding limits
-    return this.dailyRevenue <= this.maxDailyRevenue && 
-           this.monthlyRevenue <= this.maxMonthlyRevenue;
-  },
-  
-  // Check if accepting more orders would exceed limits
-  canAcceptMoreOrders(): boolean {
-    // Allow some buffer (95% of limit)
-    return this.dailyRevenue < (this.maxDailyRevenue * 0.95) && 
-           this.monthlyRevenue < (this.maxMonthlyRevenue * 0.95);
-  },
-  
-  // Get percentage of daily target reached
-  getDailyPercentage(): number {
-    return (this.dailyRevenue / this.maxDailyRevenue) * 100;
-  },
-  
-  // Get percentage of monthly target reached
-  getMonthlyPercentage(): number {
-    return (this.monthlyRevenue / this.maxMonthlyRevenue) * 100;
-  },
-  
-  // Adjust marketing and promotions based on revenue status
-  getRevenueStatus(): {
-    status: "under_target" | "on_target" | "near_limit" | "at_limit";
-    adSpendMultiplier: number;
-    shouldOfferPromotions: boolean;
-  } {
-    const dailyPercentage = this.getDailyPercentage();
-    const monthlyPercentage = this.getMonthlyPercentage();
+    // Calculate appropriate bundle discount based on total value
+    const bundleItems = [productId, ...recommendations];
     
-    if (dailyPercentage > 95 || monthlyPercentage > 95) {
-      return {
-        status: "at_limit",
-        adSpendMultiplier: 0, // Stop all ad spend
-        shouldOfferPromotions: false
-      };
+    // Higher value bundles get bigger discounts, max 15%
+    let discountPercent = 5; // Base discount
+    
+    if (recommendations.length >= 2) {
+      discountPercent = 10;
     }
     
-    if (dailyPercentage > 80 || monthlyPercentage > 80) {
-      return {
-        status: "near_limit",
-        adSpendMultiplier: 0.3, // Reduce ad spend by 70%
-        shouldOfferPromotions: false
-      };
-    }
-    
-    if (dailyPercentage > 50 || monthlyPercentage > 50) {
-      return {
-        status: "on_target",
-        adSpendMultiplier: 0.8, // Reduce ad spend by 20%
-        shouldOfferPromotions: true
-      };
+    if (recommendations.length >= 3) {
+      discountPercent = 15;
     }
     
     return {
-      status: "under_target",
-      adSpendMultiplier: 1.0, // Full ad spend
-      shouldOfferPromotions: true
+      bundleItems,
+      discountPercent
     };
+  } catch (error) {
+    console.error('Bundle offer error:', error);
+    return { bundleItems: [productId], discountPercent: 0 };
   }
-};
+}

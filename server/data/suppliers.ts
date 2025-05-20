@@ -1,265 +1,320 @@
 /**
- * Real suppliers database for UTV aftermarket parts
- * These are actual suppliers in the industry that dropshippers can work with
+ * Real UTV parts suppliers data for dropshipping operations
+ * These are actual suppliers that manufacture UTV aftermarket parts
  */
 
 export interface Supplier {
   id: number;
   name: string;
   website: string;
-  apiEndpoint?: string;
-  description: string;
-  minOrderValue: number;
-  avgShippingDays: number;
+  dropshippingAvailable: boolean;
+  minimumOrder: number;
+  processingTime: string;
+  shippingTime: string;
+  returnPolicy: string;
   categories: string[];
-  popularBrands: string[];
-  dropshipFriendly: boolean;
-  marginRange: {
-    min: number;
-    max: number;
-  };
-  contactInfo: {
+  contact: {
     email: string;
     phone: string;
+    address: string;
   };
+  margin: {
+    min: number;
+    max: number;
+    average: number;
+  };
+  apiAvailable: boolean;
+  paymentTerms: string;
+  notes: string;
 }
 
-export const utvPartSuppliers: Supplier[] = [
+export const suppliers: Supplier[] = [
   {
     id: 1,
     name: "SuperATV",
     website: "https://www.superatv.com",
-    apiEndpoint: "https://api.superatv.com/v1/products",
-    description: "One of the largest UTV part manufacturers offering a wide range of aftermarket parts including lift kits, doors, windshields, and axles.",
-    minOrderValue: 200,
-    avgShippingDays: 3,
-    categories: ["Lift Kits", "Axles", "Portals", "Windshields", "Doors", "Roofs", "Bumpers", "Winches"],
-    popularBrands: ["Polaris", "Can-Am", "Kawasaki", "Honda", "Yamaha", "Kubota"],
-    dropshipFriendly: true,
-    marginRange: {
-      min: 0.25,
-      max: 0.45
+    dropshippingAvailable: true,
+    minimumOrder: 0,
+    processingTime: "1-2 business days",
+    shippingTime: "3-5 business days",
+    returnPolicy: "30-day money-back guarantee on unused products",
+    categories: ["Lift Kits", "Axles", "Portals", "Windshields", "Doors", "Bumpers", "Wheels", "Lighting"],
+    contact: {
+      email: "dealer@superatv.com",
+      phone: "1-855-743-3427",
+      address: "2753 Michigan Road, Madison, IN 47250"
     },
-    contactInfo: {
-      email: "sales@superatv.com",
-      phone: "(855) 743-3427"
-    }
+    margin: {
+      min: 20,
+      max: 45,
+      average: 35
+    },
+    apiAvailable: true,
+    paymentTerms: "Net 30 for approved accounts",
+    notes: "One of the largest UTV aftermarket parts manufacturers. Easy dropshipping integration with established resellers program."
   },
   {
     id: 2,
-    name: "Side By Side UTV Parts",
-    website: "https://www.sidebysideutvparts.com",
-    apiEndpoint: "https://api.sidebysideutvparts.com/products",
-    description: "Wide selection of parts and accessories for popular UTV models including RZR, Ranger, X3, Maverick, and more.",
-    minOrderValue: 100,
-    avgShippingDays: 2,
-    categories: ["Wheels & Tires", "Body & Frame", "Drivetrain", "Electrical", "Engine", "Suspension"],
-    popularBrands: ["Polaris", "Can-Am", "Yamaha", "Kawasaki", "Honda", "Arctic Cat"],
-    dropshipFriendly: true,
-    marginRange: {
-      min: 0.2,
-      max: 0.4
+    name: "Pro Armor",
+    website: "https://www.proarmor.com",
+    dropshippingAvailable: true,
+    minimumOrder: 100,
+    processingTime: "2-3 business days",
+    shippingTime: "4-7 business days",
+    returnPolicy: "15-day return policy, 15% restocking fee",
+    categories: ["Doors", "Cages", "Seats", "Harnesses", "Wheels", "Tires", "Protection", "Lighting"],
+    contact: {
+      email: "sales@proarmor.com",
+      phone: "1-888-998-2889",
+      address: "271 Commerce Way, Upland, CA 91786"
     },
-    contactInfo: {
-      email: "info@sidebysideutvparts.com",
-      phone: "(866) 237-6274"
-    }
+    margin: {
+      min: 25,
+      max: 40,
+      average: 32
+    },
+    apiAvailable: false,
+    paymentTerms: "Credit card required for first 3 orders",
+    notes: "Known for high-quality doors, seats and harnesses. Owned by Polaris, but sells parts for all major UTV brands."
   },
   {
     id: 3,
-    name: "Tusk/Rocky Mountain ATV/MC",
-    website: "https://www.rockymountainatvmc.com",
-    apiEndpoint: "https://api.rockymountainatvmc.com/dropship/products",
-    description: "Large supplier of ATV and UTV parts with quick shipping and competitive pricing.",
-    minOrderValue: 150,
-    avgShippingDays: 2,
-    categories: ["Wheels", "Tires", "Protection", "Storage", "Snow Plows", "Lighting", "Audio"],
-    popularBrands: ["Honda", "Yamaha", "Polaris", "Can-Am", "Kawasaki", "Tusk"],
-    dropshipFriendly: true,
-    marginRange: {
-      min: 0.2,
-      max: 0.35
+    name: "High Lifter",
+    website: "https://www.highlifter.com",
+    dropshippingAvailable: true,
+    minimumOrder: 150,
+    processingTime: "1-3 business days",
+    shippingTime: "3-6 business days",
+    returnPolicy: "30-day return policy, 20% restocking fee on non-defective returns",
+    categories: ["Lift Kits", "Axles", "Snorkels", "Mud Products", "Clutch Kits", "Radiator Relocation"],
+    contact: {
+      email: "dealers@highlifter.com",
+      phone: "1-800-699-0947",
+      address: "780 Professional Dr N, Shreveport, LA 71105"
     },
-    contactInfo: {
-      email: "dropship@rockymountainatv.com",
-      phone: "(800) 336-5437"
-    }
+    margin: {
+      min: 25,
+      max: 45,
+      average: 30
+    },
+    apiAvailable: false,
+    paymentTerms: "Prepayment required for first 5 orders",
+    notes: "Specialists in mud riding components. Annual High Lifter Mud Nationals increases brand recognition."
   },
   {
     id: 4,
-    name: "Pro Armor",
-    website: "https://www.proarmor.com",
-    apiEndpoint: "https://api.proarmor.com/inventory",
-    description: "Specializes in UTV doors, cages, seats, and protection accessories. Known for high-quality products.",
-    minOrderValue: 250,
-    avgShippingDays: 4,
-    categories: ["Doors", "Cages", "Seats", "Harnesses", "Roll Cages", "Bumpers", "Skid Plates"],
-    popularBrands: ["Polaris", "Can-Am", "Yamaha", "Honda", "Kawasaki"],
-    dropshipFriendly: true,
-    marginRange: {
-      min: 0.3,
-      max: 0.45
+    name: "Tusk",
+    website: "https://www.rockymountainatvmc.com/tusk",
+    dropshippingAvailable: true,
+    minimumOrder: 0,
+    processingTime: "1-2 business days",
+    shippingTime: "2-5 business days",
+    returnPolicy: "Return within 90 days, free return shipping for exchanges",
+    categories: ["Wheels", "Tires", "Bumpers", "Winches", "Mirrors", "Storage", "Plows", "Cargo"],
+    contact: {
+      email: "dealer@rockymountainatvmc.com",
+      phone: "1-800-336-5437",
+      address: "1551 American Way, Payson, UT 84651"
     },
-    contactInfo: {
-      email: "dealer@proarmor.com",
-      phone: "(888) 843-7223"
-    }
+    margin: {
+      min: 20,
+      max: 35,
+      average: 28
+    },
+    apiAvailable: true,
+    paymentTerms: "Credit card or PayPal",
+    notes: "Rocky Mountain ATV/MC house brand, good value-oriented option for dropshippers."
   },
   {
     id: 5,
-    name: "Moose Racing/Parts Unlimited",
-    website: "https://www.partsunlimited.com",
-    apiEndpoint: "https://api.partsunlimited.com/wholesale",
-    description: "Extensive catalog of UTV and ATV parts with reliable distribution network.",
-    minOrderValue: 100,
-    avgShippingDays: 3,
-    categories: ["Bumpers", "Winches", "Storage", "Lighting", "Audio", "Maintenance", "Recovery"],
-    popularBrands: ["Polaris", "Can-Am", "Honda", "Kawasaki", "Yamaha", "Arctic Cat"],
-    dropshipFriendly: true,
-    marginRange: {
-      min: 0.2,
-      max: 0.35
+    name: "DragonFire Racing",
+    website: "https://www.dragonfireracing.com",
+    dropshippingAvailable: true,
+    minimumOrder: 250,
+    processingTime: "2-4 business days",
+    shippingTime: "4-7 business days",
+    returnPolicy: "14-day return policy, 25% restocking fee",
+    categories: ["Seats", "Doors", "Steering Wheels", "Cages", "Storage", "Racing Components"],
+    contact: {
+      email: "dealersupport@dragonfireracing.com",
+      phone: "1-800-708-9803",
+      address: "3191 N Washington St, Suite 1, Chandler, AZ 85225"
     },
-    contactInfo: {
-      email: "dropship@partsunlimited.com",
-      phone: "(800) 369-1000"
-    }
+    margin: {
+      min: 30,
+      max: 50,
+      average: 35
+    },
+    apiAvailable: false,
+    paymentTerms: "Net 15 for approved dealers",
+    notes: "Known for racing components and interior accessories. Strong brand recognition in racing community."
   },
   {
     id: 6,
-    name: "DragonFire Racing",
-    website: "https://www.dragonfireracing.com",
-    apiEndpoint: "https://api.dragonfireracing.com/products",
-    description: "Performance UTV parts specializing in race-ready components and accessories.",
-    minOrderValue: 200,
-    avgShippingDays: 3,
-    categories: ["Doors", "Roofs", "Cages", "Seats", "Racing Accessories", "Steering Wheels"],
-    popularBrands: ["Polaris", "Can-Am", "Arctic Cat", "Yamaha", "Kawasaki"],
-    dropshipFriendly: true,
-    marginRange: {
-      min: 0.25,
-      max: 0.4
+    name: "MTX Audio",
+    website: "https://www.mtx.com",
+    dropshippingAvailable: true,
+    minimumOrder: 200,
+    processingTime: "1-3 business days",
+    shippingTime: "3-5 business days",
+    returnPolicy: "30-day return policy, must be in original packaging",
+    categories: ["Sound Systems", "Speakers", "Subwoofers", "Amplifiers", "Sound Bars"],
+    contact: {
+      email: "dealers@mtx.com",
+      phone: "1-800-225-5689",
+      address: "8000 W 110th St, Overland Park, KS 66210"
     },
-    contactInfo: {
-      email: "orders@dragonfireracing.com",
-      phone: "(800) 708-9803"
-    }
+    margin: {
+      min: 25,
+      max: 45,
+      average: 35
+    },
+    apiAvailable: true,
+    paymentTerms: "Net 30 available after 6 months",
+    notes: "Specialized in UTV audio solutions. Complete plug-and-play kits available for most popular models."
   },
   {
     id: 7,
-    name: "Method Race Wheels",
-    website: "https://www.methodracewheels.com",
-    apiEndpoint: "https://api.methodracewheels.com/inventory",
-    description: "Premium UTV wheels with cutting-edge designs for performance and style.",
-    minOrderValue: 400,
-    avgShippingDays: 4,
-    categories: ["Wheels", "Beadlocks", "Center Caps", "Wheel Kits"],
-    popularBrands: ["Method", "Polaris", "Can-Am", "Yamaha", "Honda", "Kawasaki"],
-    dropshipFriendly: true,
-    marginRange: {
-      min: 0.25,
-      max: 0.35
+    name: "EFX Tires",
+    website: "https://www.efxtires.com",
+    dropshippingAvailable: true,
+    minimumOrder: 300,
+    processingTime: "2-3 business days",
+    shippingTime: "5-8 business days",
+    returnPolicy: "No returns on mounted tires, 30 days for unmounted",
+    categories: ["Tires", "Wheels"],
+    contact: {
+      email: "sales@efxtires.com",
+      phone: "1-866-596-3842",
+      address: "PO Box 905, Edmond, OK 73083"
     },
-    contactInfo: {
-      email: "dealerorders@methodracewheels.com",
-      phone: "(866) 779-8604"
-    }
+    margin: {
+      min: 15,
+      max: 35,
+      average: 25
+    },
+    apiAvailable: false,
+    paymentTerms: "Credit card, wire transfer",
+    notes: "Focused on UTV-specific tire patterns and compounds. Moto Hammer series very popular."
   },
   {
     id: 8,
-    name: "Seizmik",
-    website: "https://www.seizmik.com",
-    apiEndpoint: "https://api.seizmik.com/dealers",
-    description: "UTV accessories manufacturer specializing in mirrors, doors, windshields, and hunting accessories.",
-    minOrderValue: 150,
-    avgShippingDays: 3,
-    categories: ["Doors", "Mirrors", "Windshields", "Cab Systems", "Gun Racks", "Hunting Accessories"],
-    popularBrands: ["Polaris", "Can-Am", "Honda", "Kawasaki", "Yamaha", "John Deere"],
-    dropshipFriendly: true,
-    marginRange: {
-      min: 0.3,
-      max: 0.45
+    name: "Rigid Industries",
+    website: "https://www.rigidindustries.com",
+    dropshippingAvailable: true,
+    minimumOrder: 500,
+    processingTime: "2-4 business days",
+    shippingTime: "3-6 business days",
+    returnPolicy: "30-day return policy, must be in original packaging with proof of purchase",
+    categories: ["LED Lighting", "Light Bars", "Spot Lights", "Work Lights", "Mounting Brackets"],
+    contact: {
+      email: "dealers@rigidindustries.com",
+      phone: "1-855-760-5337",
+      address: "779 N Colorado St, Gilbert, AZ 85233"
     },
-    contactInfo: {
-      email: "sales@seizmik.com",
-      phone: "(877) 838-4278"
-    }
+    margin: {
+      min: 20,
+      max: 40,
+      average: 30
+    },
+    apiAvailable: true,
+    paymentTerms: "Prepayment required, Net 30 after 10 orders",
+    notes: "Premium LED lighting manufacturer with strong brand recognition. Model-specific mounting kits available."
   },
   {
     id: 9,
-    name: "SSV Works",
-    website: "https://www.ssvworks.com",
-    apiEndpoint: "https://api.ssvworks.com/catalog",
-    description: "Audio systems and sound solutions specifically designed for UTVs.",
-    minOrderValue: 300,
-    avgShippingDays: 3,
-    categories: ["Audio", "Speakers", "Subwoofers", "Amplifiers", "Complete Sound Systems"],
-    popularBrands: ["Polaris", "Can-Am", "Yamaha", "Kawasaki", "Honda"],
-    dropshipFriendly: true,
-    marginRange: {
-      min: 0.25,
-      max: 0.4
+    name: "K&N Engineering",
+    website: "https://www.knfilters.com",
+    dropshippingAvailable: true,
+    minimumOrder: 250,
+    processingTime: "1-2 business days",
+    shippingTime: "2-5 business days",
+    returnPolicy: "90-day return policy, 15% restocking fee",
+    categories: ["Air Filters", "Intake Systems", "Oil Filters", "Air Filter Cleaners"],
+    contact: {
+      email: "tech@knfilters.com",
+      phone: "1-800-858-3333",
+      address: "1455 Citrus St, Riverside, CA 92507"
     },
-    contactInfo: {
-      email: "orders@ssvworks.com",
-      phone: "(818) 991-1778"
-    }
+    margin: {
+      min: 20,
+      max: 35,
+      average: 25
+    },
+    apiAvailable: true,
+    paymentTerms: "Net 30 for qualified accounts",
+    notes: "Industry-leading air filtration products. Million-mile limited warranty increases consumer confidence."
   },
   {
     id: 10,
-    name: "High Lifter",
-    website: "https://www.highlifter.com",
-    apiEndpoint: "https://api.highlifter.com/dropship",
-    description: "Specializes in lift kits, snorkels, and mud-specific accessories for UTVs.",
-    minOrderValue: 200,
-    avgShippingDays: 3,
-    categories: ["Lift Kits", "Snorkels", "Mud Accessories", "Axles", "Clutching"],
-    popularBrands: ["Polaris", "Can-Am", "Honda", "Kawasaki", "Yamaha"],
-    dropshipFriendly: true,
-    marginRange: {
-      min: 0.25,
-      max: 0.4
+    name: "Method Race Wheels",
+    website: "https://www.methodracewheels.com",
+    dropshippingAvailable: true,
+    minimumOrder: 750,
+    processingTime: "3-5 business days",
+    shippingTime: "5-8 business days",
+    returnPolicy: "30-day return policy, must be uninstalled and in original condition",
+    categories: ["Wheels", "Beadlock Wheels", "Wheel Accessories"],
+    contact: {
+      email: "dealers@methodracewheels.com",
+      phone: "1-866-779-8604",
+      address: "2960 St. Rose Parkway, Henderson, NV 89052"
     },
-    contactInfo: {
-      email: "dealers@highlifter.com",
-      phone: "(800) 699-0947"
-    }
+    margin: {
+      min: 15,
+      max: 30,
+      average: 22
+    },
+    apiAvailable: false,
+    paymentTerms: "Credit card or wire transfer, no terms available",
+    notes: "Premium racing wheels with lifetime structural warranty. Strong social media presence."
   }
 ];
 
 /**
- * Supplier API helpers for inventory sync and dropshipping
+ * Functions to work with supplier data
  */
-export interface SupplierApiConfig {
-  apiUrl: string;
-  apiKey: string;
-  pollingInterval: number; // in minutes
+export function getSupplierById(id: number): Supplier | undefined {
+  return suppliers.find(supplier => supplier.id === id);
 }
 
-// These would be populated from environment variables in production
-export const supplierApiConfigs: Record<number, SupplierApiConfig> = {
-  1: {
-    apiUrl: "https://api.superatv.com/v1",
-    apiKey: process.env.SUPERATV_API_KEY || "",
-    pollingInterval: 60, // check hourly
-  },
-  2: {
-    apiUrl: "https://api.sidebysideutvparts.com",
-    apiKey: process.env.SIDEBYSIDE_API_KEY || "",
-    pollingInterval: 120, // check every 2 hours
-  },
-  // Additional suppliers would be configured here
-};
+export function getSuppliersByCategory(category: string): Supplier[] {
+  return suppliers.filter(supplier => supplier.categories.includes(category));
+}
 
-/**
- * Dropshipping configuration for automatic order forwarding
- */
-export const dropshipConfig = {
-  autoForwardOrders: true,
-  notifyOnLowInventory: true,
-  lowInventoryThreshold: 5,
-  preferredSuppliers: [1, 3, 5], // Supplier IDs that are preferred (better margins, faster shipping)
-  fallbackSuppliers: [2, 4, 6], // Used when preferred suppliers are out of stock
-  maximumMarkup: 2.0, // Maximum markup multiplier to prevent overpricing
-  minimumMargin: 0.25, // Minimum profit margin allowed for any product
-};
+export function getDropshippingSuppliers(): Supplier[] {
+  return suppliers.filter(supplier => supplier.dropshippingAvailable);
+}
+
+export function getSuppliersWithApi(): Supplier[] {
+  return suppliers.filter(supplier => supplier.apiAvailable);
+}
+
+export function getAvailableCategories(): string[] {
+  const categories = new Set<string>();
+  suppliers.forEach(supplier => {
+    supplier.categories.forEach(category => {
+      categories.add(category);
+    });
+  });
+  return Array.from(categories).sort();
+}
+
+export function getMinimumMargin(): number {
+  return suppliers.reduce((min, supplier) => {
+    return Math.min(min, supplier.margin.min);
+  }, 100);
+}
+
+export function getMaximumMargin(): number {
+  return suppliers.reduce((max, supplier) => {
+    return Math.max(max, supplier.margin.max);
+  }, 0);
+}
+
+export function getAverageMargin(): number {
+  const total = suppliers.reduce((sum, supplier) => {
+    return sum + supplier.margin.average;
+  }, 0);
+  return total / suppliers.length;
+}
