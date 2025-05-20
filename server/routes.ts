@@ -34,7 +34,7 @@ if (!process.env.OPENAI_API_KEY) {
 
 // Initialize Stripe if API key is available
 const stripe = process.env.STRIPE_SECRET_KEY ? 
-  new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: "2023-10-16" }) : 
+  new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: "2025-04-30.basil" }) : 
   null;
 
 // Initialize OpenAI if API key is available
@@ -145,7 +145,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Generate response
       const completion = await openai.chat.completions.create({
         model: "gpt-4o", // the newest OpenAI model is "gpt-4o" which was released May 13, 2024. do not change this unless explicitly requested by the user
-        messages: promptMessages,
+        messages: promptMessages.map(msg => ({
+          role: msg.role as "system" | "user" | "assistant",
+          content: msg.content
+        })),
         max_tokens: 300
       });
       
@@ -644,6 +647,81 @@ export async function registerRoutes(app: Express): Promise<Server> {
       order,
       items: products
     });
+  }));
+
+  // Stripe Webhook Handler - Critical for payment confirmations
+  app.post("/api/stripe-webhook", handleErrors(async (req, res) => {
+    if (!stripe) {
+      return res.status(503).json({ message: 'Payment service unavailable' });
+    }
+    
+    // Get the raw body and signature header
+    const payload = req.body;
+    const sig = req.headers['stripe-signature'] as string;
+    
+    let event;
+    
+    try {
+      // Verify webhook signature using Stripe's webhook secret
+      // For production, set process.env.STRIPE_WEBHOOK_SECRET in your environment
+      const endpointSecret = process.env.STRIPE_WEBHOOK_SECRET;
+      
+      if (endpointSecret) {
+        event = stripe.webhooks.constructEvent(payload, sig, endpointSecret);
+      } else {
+        // Fallback for development (NOT SECURE for production!)
+        event = payload;
+        console.warn('STRIPE_WEBHOOK_SECRET not set. Skipping signature verification - NOT SECURE FOR PRODUCTION!');
+      }
+      
+      // Handle various payment events
+      switch (event.type) {
+        case 'payment_intent.succeeded':
+          const paymentIntent = event.data.object;
+          
+          // Update order status using the orderId from metadata
+          const { orderId, orderNumber } = paymentIntent.metadata;
+          if (orderId) {
+            await storage.updateOrderStatus(parseInt(orderId), 'processing');
+            await storage.updatePaymentStatus(parseInt(orderId), 'paid', paymentIntent.id);
+            
+            console.log(`Payment for order ${orderNumber} (ID: ${orderId}) completed successfully`);
+          }
+          break;
+          
+        case 'payment_intent.payment_failed':
+          const failedPaymentIntent = event.data.object;
+          
+          // Update order status to failed
+          const failedOrderId = failedPaymentIntent.metadata.orderId;
+          if (failedOrderId) {
+            await storage.updatePaymentStatus(parseInt(failedOrderId), 'failed', failedPaymentIntent.id);
+            console.log(`Payment for order ${failedOrderId} failed`);
+          }
+          break;
+          
+        case 'charge.refunded':
+          const refund = event.data.object;
+          const refundedOrderId = refund.metadata?.orderId;
+          
+          if (refundedOrderId) {
+            await storage.updateOrderStatus(parseInt(refundedOrderId), 'refunded');
+            await storage.updatePaymentStatus(parseInt(refundedOrderId), 'refunded');
+            console.log(`Refund processed for order ${refundedOrderId}`);
+          }
+          break;
+          
+        // Handle other webhook events as needed
+        default:
+          console.log(`Unhandled event type: ${event.type}`);
+      }
+      
+      // Return a 200 success response to acknowledge receipt of the event
+      res.json({ received: true });
+    } catch (error) {
+      console.error('Webhook error:', error);
+      res.status(400).json({ message: 'Webhook error', error: error.message });
+    }
   }));
 
   // Return the server instance
