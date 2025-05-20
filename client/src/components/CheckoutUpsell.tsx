@@ -1,116 +1,148 @@
-/**
- * Checkout upsell component for last-minute conversion optimization
- * This implements the critical "last chance" conversion point in the funnel
- */
-import React, { useEffect, useState } from 'react';
-import { getCheckoutOffers, type CheckoutOffer } from '../lib/salesFunnel';
-import { useCart } from '../hooks/use-cart';
-import { useAuth } from '../context/auth-context';
-import { Card, CardContent } from '@/components/ui/card';
+import React, { useEffect } from 'react';
+import { getCheckoutOffers } from '../lib/salesFunnel';
+import { Card, CardContent, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
+import { useQuery } from '@tanstack/react-query';
+import { Skeleton } from '@/components/ui/skeleton';
+import { apiRequest } from '@/lib/queryClient';
 
 interface CheckoutUpsellProps {
-  onAddToOrder: (productId: number) => void;
+  cartProductIds: number[];
+  onAddToCart: (productId: number) => void;
+  limit?: number;
 }
 
-const CheckoutUpsell: React.FC<CheckoutUpsellProps> = ({ onAddToOrder }) => {
-  const [loading, setLoading] = useState(true);
-  const [offer, setOffer] = useState<CheckoutOffer | null>(null);
-  const { items } = useCart();
-  const { user } = useAuth();
+const CheckoutUpsell = ({ 
+  cartProductIds,
+  onAddToCart,
+  limit = 2
+}: CheckoutUpsellProps) => {
   const { toast } = useToast();
   
-  // Convert cart items to format needed by API
-  const cartItems = items.map(item => ({
-    productId: item.product.id,
-    quantity: item.quantity
-  }));
-
-  useEffect(() => {
-    const fetchOffers = async () => {
+  // Fetch checkout upsell offers
+  const { data: upsellProductIds, isLoading, error } = useQuery({
+    queryKey: ['checkoutUpsells', cartProductIds.join(','), limit],
+    queryFn: async () => {
       try {
-        setLoading(true);
-        const data = await getCheckoutOffers(cartItems, user?.id);
-        
-        if (data && data.offers && data.offers.length > 0) {
-          // Just show the first offer at checkout to avoid overloading user
-          setOffer(data.offers[0]);
-        } else {
-          setOffer(null);
-        }
+        return await getCheckoutOffers(cartProductIds, limit);
       } catch (error) {
-        console.error('Error fetching checkout offers:', error);
-        setOffer(null);
-      } finally {
-        setLoading(false);
+        console.error('Error getting upsell offers:', error);
+        return [];
       }
-    };
-
-    if (cartItems.length > 0) {
-      fetchOffers();
-    }
-  }, [cartItems, user?.id]);
-
-  // Don't show anything if we don't have an offer
-  if (!loading && !offer) {
-    return null;
-  }
-
-  const handleAddToOrder = () => {
-    if (offer) {
-      onAddToOrder(offer.id);
-      toast({
-        title: "Added to order!",
-        description: `${offer.name} has been added to your order.`,
-      });
-    }
+    },
+    enabled: cartProductIds.length > 0
+  });
+  
+  // Fetch product details for upsell products
+  const { data: upsellProducts, isLoading: isLoadingProducts } = useQuery({
+    queryKey: ['productDetails', upsellProductIds],
+    queryFn: async () => {
+      if (!upsellProductIds || upsellProductIds.length === 0) return [];
+      
+      const promises = upsellProductIds.map(id => 
+        apiRequest('GET', `/api/products/${id}`)
+          .then(res => res.json())
+          .catch(err => {
+            console.error(`Error fetching product ${id}:`, err);
+            return null;
+          })
+      );
+      
+      const results = await Promise.all(promises);
+      return results.filter(Boolean); // Remove nulls from failures
+    },
+    enabled: !!upsellProductIds && upsellProductIds.length > 0
+  });
+  
+  // Add to cart handler
+  const handleAddToCart = (productId: number) => {
+    onAddToCart(productId);
+    toast({
+      title: "Added to cart",
+      description: "Product has been added to your cart",
+    });
   };
-
-  return (
-    <div className="my-6">
-      {loading ? (
-        <div className="flex justify-center items-center h-20">
-          <div className="w-6 h-6 border-4 border-primary border-t-transparent rounded-full animate-spin"></div>
-        </div>
-      ) : offer ? (
-        <Card className="overflow-hidden border-2 border-primary/20 bg-primary/5">
-          <CardContent className="p-0">
-            <div className="flex flex-col md:flex-row">
-              {offer.image && (
-                <div className="w-full md:w-1/3 h-48 md:h-auto">
-                  <img 
-                    src={offer.image} 
-                    alt={offer.name} 
-                    className="w-full h-full object-cover"
-                  />
-                </div>
-              )}
-              <div className="p-4 md:p-6 flex flex-col flex-grow">
-                <div className="bg-primary/10 text-primary font-bold px-3 py-1 rounded-full text-sm inline-block self-start mb-2">
-                  SPECIAL OFFER
-                </div>
-                <h3 className="text-xl font-bold mb-2">{offer.name}</h3>
-                <p className="text-sm text-gray-600 mb-4">{offer.message}</p>
-                <div className="mt-auto flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-                  <div className="text-lg font-bold">
-                    ${typeof offer.price === 'number' 
-                      ? offer.price.toFixed(2) 
-                      : parseFloat(offer.price).toFixed(2)}
-                  </div>
-                  <Button 
-                    onClick={handleAddToOrder}
-                    size="lg"
-                    className="w-full sm:w-auto"
-                  >
-                    {offer.cta}
-                  </Button>
-                </div>
+  
+  if (!cartProductIds.length) {
+    return null; // Don't show upsells when cart is empty
+  }
+  
+  if (isLoading || isLoadingProducts) {
+    return (
+      <div className="my-8 p-6 border border-gray-200 rounded-lg">
+        <h2 className="text-xl font-bold mb-4">Complete Your Purchase</h2>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {Array(limit).fill(0).map((_, i) => (
+            <Card key={i} className="flex">
+              <div className="w-1/3">
+                <Skeleton className="h-24 w-full" />
               </div>
+              <div className="w-2/3">
+                <CardContent className="py-4">
+                  <Skeleton className="h-4 w-3/4 mb-2" />
+                  <Skeleton className="h-4 w-1/2" />
+                  <Skeleton className="h-4 w-1/4 mt-2" />
+                </CardContent>
+                <CardFooter>
+                  <Skeleton className="h-10 w-full" />
+                </CardFooter>
+              </div>
+            </Card>
+          ))}
+        </div>
+      </div>
+    );
+  }
+  
+  if (error) {
+    return null; // Don't show errors at checkout
+  }
+  
+  if (!upsellProducts || upsellProducts.length === 0) {
+    return null; // Don't show anything if no upsells
+  }
+  
+  return (
+    <div className="my-8 p-6 border border-gray-200 rounded-lg bg-gray-50">
+      <h2 className="text-xl font-bold mb-4">Customers Also Bought</h2>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {upsellProducts.map(product => (
+          <Card key={product.id} className="flex overflow-hidden">
+            <div className="w-1/3">
+              {product.images && (
+                <img 
+                  src={Array.isArray(product.images) ? product.images[0] : product.images} 
+                  alt={product.name}
+                  className="w-full h-full object-cover object-center"
+                />
+              )}
             </div>
-          </CardContent>
-        </Card>
-      ) : null}
+            <div className="w-2/3">
+              <CardContent className="py-4">
+                <h3 className="font-medium">{product.name}</h3>
+                <div className="flex items-center mt-2">
+                  <div className="text-lg font-bold mr-2">${parseFloat(product.price).toFixed(2)}</div>
+                  {product.compareAtPrice && (
+                    <div className="text-sm line-through text-gray-400">
+                      ${parseFloat(product.compareAtPrice).toFixed(2)}
+                    </div>
+                  )}
+                </div>
+              </CardContent>
+              <CardFooter>
+                <Button 
+                  onClick={() => handleAddToCart(product.id)} 
+                  className="w-full"
+                  variant="outline"
+                >
+                  Add to Order
+                </Button>
+              </CardFooter>
+            </div>
+          </Card>
+        ))}
+      </div>
     </div>
   );
 };
