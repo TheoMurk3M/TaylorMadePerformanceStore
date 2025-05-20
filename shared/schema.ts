@@ -165,6 +165,7 @@ export const insertOrderSchema = createInsertSchema(orders).pick({
   shippingAddress: true,
   billingAddress: true,
   shippingMethod: true,
+  shippingCost: true,
   subtotal: true,
   tax: true,
   total: true,
